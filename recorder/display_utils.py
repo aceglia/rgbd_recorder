@@ -1,5 +1,6 @@
 from venv import create
 from PyQt5.QtWidgets import QWidget,QVBoxLayout, QLabel
+import cv2
 from enums import DisplayType
 import pyqtgraph as pg
 from biosiglive import LivePlot, PlotType
@@ -37,7 +38,7 @@ class CurveTab(Tab):
         nb_subplots=self.nb_channels,
         channel_names=self.channel_names
         )
-        self.plot_curve.init(plot_windows=1000, y_labels=["V"] * self.nb_channels, create_app=False)
+        self.plot_curve.init(plot_windows=10000, y_labels=["V"] * self.nb_channels, create_app=False)
 
         self.widget = self.plot_curve.win
         layout = QVBoxLayout()
@@ -47,9 +48,10 @@ class CurveTab(Tab):
     def update_plot(self):
         try:
             data = self.data_queue.get(timeout=0.1)
-            self.plot_curve.update(data)
         except:
-            print("Queue empty")
+            return
+        self.plot_curve.update(data[None, :])
+
         
     def set_data(self, data):
         self.data_queue = data
@@ -59,13 +61,14 @@ class ImageTab(Tab):
     def __init__(self, name, content):
         super().__init__(name, content)
         self.type = DisplayType.IMAGE
-        self.data_shape = (848, 480)
-        self.shared_color_image = np.zeros((3, 848, 480))
-        self.shared_depth_image = np.zeros((848, 480))
+        self.data_shape = content['image_res'].split('x')
+        self.data_shape = (int(self.data_shape[1]), int(self.data_shape[0]))
+        self.shared_color_image = np.zeros((3, self.data_shape[0], self.data_shape[1]))
+        self.shared_depth_image = np.zeros(self.data_shape)
         self.initialize_widget()
 
     def initialize_widget(self):
-        self.image_widget = ScaledImage()
+        self.image_widget = ScaledImage(self.data_shape)
         layout = QVBoxLayout()
         layout.addWidget(self.image_widget)
         self.setLayout(layout)
@@ -74,48 +77,44 @@ class ImageTab(Tab):
     #     self.image_widget.update_scaled_image()
     
     def update_plot(self):
-        color = self.shared_color_image.copy()
-        depth = self.shared_depth_image.copy()
-        self.image_widget.update_scaled_image(color, depth)
-    
-    def set_data(self, color_image, depth_image):
+        try:
+            frame_number, buff_idx = self.frame_queue.get(timeout=0.1)
+            color_image = self.shared_color_image[..., buff_idx].copy()
+            depth_image = self.shared_depth_image[..., buff_idx].copy()
+            self.image_widget.update_scaled_image(color_image, depth_image, frame_number)
+        except:
+            pass
+
+    def set_data(self, color_image, depth_image, frame_queue):
         self.shared_color_image = color_image
         self.shared_depth_image = depth_image
+        self.frame_queue = frame_queue
     
     
 class ScaledImage(QLabel):
-    def __init__(self):
+    def __init__(self, image_shape):
         super().__init__()
         self.setAlignment(Qt.AlignCenter)
-        self.data_shape = (10, 10)
-        import cv2
-        path = "D:\Documents\Programmation\pose_estimation\data_files\P9\gear_5_11-01-2024_16_59_32/"
-        image_tmp = cv2.imread(path + "color_1372.png")
-        self.image = cv2.cvtColor(image_tmp, cv2.COLOR_BGR2RGB)
-        image = QImage(self.image, self.image.shape[1], self.image.shape[0],self.image.strides[0],  QImage.Format_RGB888)
-        # image.fill(QColor(0, 0, 0))
-        self.original_pixmap = QPixmap.fromImage(image)
-        # self.update_scaled_image(self.image)
+        self.image_shape = image_shape
+        self.update_scaled_image(np.zeros((image_shape[0], image_shape[1], 3), dtype=np.uint8), np.zeros(image_shape, dtype=np.float32))
     
-    def update_scaled_image(self, color, depth):
-        # def show_cv2_images(self, color, depth, frame_number, fps):
-        # fps = 0 if not np.isfinite(fps) else fps
-        # color_image = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
-        # depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=0.03), cv2.COLORMAP_JET)
-        # cv2.addWeighted(depth_colormap, 0.8, color_image, 0.8, 0, color_image)
-        # cv2.putText(
-        #     color_image,
-        #     f"FPS: {int(fps)} | frame: {frame_number}",
-        #     (10, 30),
-        #     cv2.FONT_HERSHEY_SIMPLEX,
-        #     1,
-        #     (0, 0, 0),
-        #     2,
-        #     cv2.LINE_AA,
-        # )
-        # cv2.waitKey(1)
-        # cv2.namedWindow("RealSense", cv2.WINDOW_NORMAL)
-        # cv2.imshow("RealSense", color_image)
+    def update_scaled_image(self, color, depth, frame_number = None):
+        if frame_number is None:
+            frame_number = 0
+
+        color = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
+        depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=0.03), cv2.COLORMAP_JET)
+        cv2.addWeighted(depth_colormap, 0.8, color, 0.8, 0, color)
+        cv2.putText(
+            color,
+            f"Frame: {frame_number}",
+            (10, 30),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 0, 0),
+            2,
+            cv2.LINE_AA,
+        )
 
         image = QImage(color, color.shape[1], color.shape[0], color.strides[0],  QImage.Format_RGB888)
         original_map = QPixmap.fromImage(image)

@@ -8,12 +8,10 @@ from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QPushButton, QLabel, QVBoxLayout, QLineEdit, QHBoxLayout,QWidget,  QMessageBox, QSplitter)
 
 from delsys_recorder import DelsysRecorder
-from recorder import trigger
 from rgbd_recorder import RgbdRecorder
 from trigger_recorder import TriggerRecorder
 from utils import LogBox
 from configuration import ConfigurationWindow
-from synchronizer import Synchronizer
 from display import Display
 from PyQt5.QtCore import Qt, QTimer
 
@@ -53,7 +51,6 @@ class MenuBar:
 class GUI(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.sync = Synchronizer()
         self.setWindowTitle("RGBD recorder")
         self.log_box = None
         self.central_widget = QWidget()
@@ -66,6 +63,8 @@ class GUI(QMainWindow):
         self.delsys_queue_display = None
         self.trigger_queue_display = None
         self.use_trigger = False
+        self.trigger_start_event = None
+        self.trigger_stop_event = None
 
         self.refresh_plot = 16  # refresh plot at 60 Hz
         self.buffer_size = 20
@@ -81,6 +80,8 @@ class GUI(QMainWindow):
         
         self.timer_plot = QTimer(self)
         self.timer_plot.setInterval(self.refresh_plot)
+        self.timer_plot.timeout.connect(self.start_timer)
+
 
     def _init_layout(self):
         futur_display = QWidget()
@@ -90,10 +91,10 @@ class GUI(QMainWindow):
         self.clear_log_button = QPushButton("Clear Log")
         self.clear_log_button.clicked.connect(self.log_box.clear)
         self.start_button = QPushButton("Start")
-        self.start_button.clicked.connect(self.start)
+        self.start_button.clicked.connect(self.start_recording)
         self.start_button.setEnabled(False)
         self.stop_button = QPushButton("Stop")
-        self.stop_button.clicked.connect(self.stop)
+        self.stop_button.clicked.connect(self.stop_recording)
         self.stop_button.setEnabled(False)
 
         splitter = QSplitter(Qt.Vertical)
@@ -115,6 +116,16 @@ class GUI(QMainWindow):
         # main_layout.addWidget(self.clear_log_button, 2, 0, 1, 2)
         self.central_widget.setLayout(main_layout)
         
+    def start_recording(self):
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.trigger_start_event.set()
+
+    def stop_recording(self):
+        self.trigger_stop_event.set()
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+
     def _create_menu_bar(self):
         self.menu_bar = MenuBar(self)
         self.menu_bar.trigger_action.triggered.connect(self.configuration.create_trigger_tab)
@@ -148,38 +159,39 @@ class GUI(QMainWindow):
         self.show_config()
 
     def _init_mp_var(self):
-        self.event_started = [mp.Event()] * (len(self.configuration.tabs - 1) + self.nb_save_process)
+        self.event_started = [mp.Event()] * (len(self.configuration.get_tab_names()) - 1 + self.nb_save_process)
         
-        self.frame_queue = mp.Queue()
+        self.frame_queue = mp.Manager().Queue()
 
         self.trigger_start_event = mp.Event()
         self.trigger_stop_event = mp.Event()
 
         self.stop_event = mp.Event()
 
-        self.log_queue = mp.Queue()
+        self.log_queue = mp.Manager().Queue()
 
         self.exception_thread = Thread(target=self.exception_handler, daemon=True)
         self.exception_thread.start()
 
+        self.plot_frame_queue = mp.Manager().Queue()
+
         if self.configuration.trig_tab is not None:
             self.use_trigger = True
-            self.trigger_queue = mp.Queue()
-            self.trigger_queue_display = mp.Queue()
+            self.trigger_queue = mp.Manager().Queue()
 
         if self.configuration.delsys_tab is not None:
             self.use_delsys = True
-            self.delsys_queue = mp.Queue()
-            self.delsys_queue_display = mp.Queue()
+            self.delsys_queue = mp.Manager().Queue()
+            self.delsys_queue_display = mp.Manager().Queue()
 
         image_res = self.configuration.rgbd_tab.get_dict()['image_res'].split('x')
         image_size = (int(image_res[0]), int(image_res[1]))
-        color_shape = (3, image_size[1], image_size[0], self.buffer_size)
+        color_shape = (image_size[1], image_size[0], 3, self.buffer_size)
         depth_shape = (image_size[1], image_size[0], self.buffer_size)
 
         color_array = RawArray("c", int(np.prod(color_shape)))  # 'c' = uint8
         depth_array = RawArray("H", int(np.prod(depth_shape))) 
-        return color_array, depth_array
+        return color_array, depth_array, color_shape, depth_shape
     
     def exception_handler(self):
         while True:
@@ -189,69 +201,75 @@ class GUI(QMainWindow):
                 continue
 
     def start(self):
+        self.menu_bar.disable_run_menu()
         self.running = True
+        self.start_button.setEnabled(True)
         self.save_directory_base = self.configuration.get_save_directory()
 
         item = self.central_widget.layout().itemAt(0).widget()
         item.setParent(None)
         self.central_widget.layout().removeWidget(item)
 
-        self.display = Display(self.configuration.config_path)
+        self.display = Display(self.configuration.config_path, log_box=self.log_box)
         splitter = QSplitter(Qt.Vertical)
         splitter.addWidget(self.display)
         splitter.addWidget(self.log_box)
         self.central_widget.layout().insertWidget(0, splitter)
 
-        self.menu_bar.disable_run_menu()
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-
         self.log("Starting processes...")
 
-        color_array, depth_array = self._init_mp_var()
+        color_array, depth_array, color_shape, depth_shape = self._init_mp_var()
         
         self.processes = []
-        p = mp.Process(target=GUI.get_rgbd, args=(color_array, depth_array,
+        p = mp.Process(target=GUI.get_rgbd, args=(self.save_directory_base, color_array, depth_array,
                                                   self.event_started,
                                                   self.frame_queue,
                                                   self.trigger_start_event,
                                                     self.trigger_stop_event,
-                                                   self.configuration.rgbd_tab.get_dict(),
-                                                   self.log_queue,), daemon=True, name="rgbd")
+                                                   self.stop_event, self.configuration.rgbd_tab.get_dict(), color_shape, depth_shape,
+                                                   self.log_queue, self.plot_frame_queue,), daemon=True, name="rgbd")
         self.processes.append(p)
 
-        for i in range(self.sync.nb_save_process):
+        for i in range(self.nb_save_process):
             p = mp.Process(target=RgbdRecorder.save_rgbd_from_buffer,
                            args=(self.save_directory_base, self.event_started,
                                   self.frame_queue, self.trigger_stop_event,
-                                    self.shared_color,
-                                      self.shared_depth, i,
-                                        self.color_shape, self.depth_shape, self.log_queue,),
+                                    color_array, depth_array, i,
+                                        color_shape, depth_shape, self.log_queue,),
                              daemon=True, name=f"save_{i}")
             self.processes.append(p)
 
         if self.configuration.delsys_tab is not None:
             p = mp.Process(target=GUI.run_delsys,
-                            args=(self.save_directory_base, self.configuration.delsys_tab.get_dict(), 
+                            args=(self.save_directory_base, self.configuration.delsys_tab.get_dict(),
+                                  self.trigger_start_event,
+                                                    self.trigger_stop_event,
+                                                   self.stop_event, 
                                   self.delsys_queue, self.log_queue,), daemon=True, name="save_delsys")
             self.processes.append(p)    
 
         if self.configuration.trig_tab is not None:
             p = mp.Process(target=GUI.get_trigger,
                             args=(self.save_directory_base, self.configuration.trig_tab.get_dict(),
-                                  self.trigger_chan, self.threeshold, self.vicon_ip,
-                                    self.trig_less, self.trigger_queue, self.log_queue,),
+                                  self.event_started, self.trigger_start_event, self.trigger_stop_event, self.stop_event, self.log_queue,
+                                    self.trigger_queue,),
                             daemon=True, name="trigger")
             self.processes.append(p)
 
         self.log("Starting display...")
-        self.display.run(color_array, depth_array, self.trigger_queue, self.delsys_queue)
+        self.display.run(color_array, depth_array, color_shape, depth_shape, self.plot_frame_queue, self.trigger_queue, self.delsys_queue, self.timer_plot)
+
+        self.timer_plot.start()
 
         self.log("Starting processes...")
         for p in self.processes:
             p.start()
             
         self.log("Programm started. Waiting for data...")
+
+    
+    def start_timer(self):
+        self.display.tabs[self.display.currentIndex()].update_plot()
 
     def stop(self):
         if not self.running:
@@ -275,23 +293,25 @@ class GUI(QMainWindow):
             self.log_box.log(message)
     
     @staticmethod
-    def get_rgbd(color_array, depth_array, event_started,
+    def get_rgbd(save_directory_base, color_array, depth_array, event_started,
                                                   frame_queue,
                                                   trigger_start_event,
-                                                    trigger_stop_event, stop_event, config_dict, log_queue):
-        recorder = RgbdRecorder(config_dict)
-        recorder.get_rgbd(color_array, depth_array,trigger_start_event,trigger_stop_event, 
-                           frame_queue, log_queue, stop_event, event_started)
+                                                    trigger_stop_event, stop_event, config_dict, color_shape, depth_shape, log_queue, plot_queue):
+        recorder = RgbdRecorder(save_directory_base, config_dict)
+        recorder.get_rgbd(color_array, depth_array, color_shape, depth_shape, trigger_start_event,trigger_stop_event, 
+                           frame_queue, log_queue, stop_event, event_started, plot_queue)
     
     @staticmethod
-    def run_delsys(save_directory_base, config_dict, delsys_queue, log_queue):
+    def run_delsys(save_directory_base, config_dict, trigger_start_event,trigger_stop_event, stop_event, delsys_queue, log_queue):
         delsys = DelsysRecorder(save_directory_base, config_dict)
-        delsys.run_delsys(delsys_queue, log_queue)
+        delsys.run_delsys(delsys_queue, trigger_start_event,trigger_stop_event, stop_event, log_queue)
     
     @staticmethod
-    def get_trigger(save_directory_base, config_dict, trigger_chan, threeshold, vicon_ip, trig_less, trig_queue, log_queue):
+    def get_trigger(save_directory_base, config_dict, event_started,
+                                                  trigger_start_event,
+                                                    trigger_stop_event, stop_event, log_queue, plot_queue):
         trigger = TriggerRecorder(save_directory_base, config=config_dict)
-        trigger.run_trigger(trigger_chan, threeshold, vicon_ip, trig_less, trig_queue)
+        trigger.get_trigger(event_started, trigger_start_event, trigger_stop_event, plot_queue, log_queue, stop_event)
     
     def popup_quit(self):
         wind = QMessageBox()

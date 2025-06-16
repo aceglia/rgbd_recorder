@@ -28,7 +28,6 @@ class CurveTab(Tab):
         self.nb_channels = 1 if name == 'trigger' else len(self.content["devices"])
         self.channel_names = ["trigger"] if name == 'trigger' else [device["name"] for device in self.content["devices"]]
         self.initialize_widget()
-        # Plot widget setup
     
     def initialize_widget(self):
         self.plot_curve = LivePlot(

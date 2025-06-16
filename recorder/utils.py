@@ -8,7 +8,7 @@ def set_shared_memory_images(shared_color, shared_depth, color_image, depth_imag
     np.copyto(shared_depth[..., idx], depth_image)
 
 
-def show_cv2_images(self, color, depth, frame_number, fps):
+def show_cv2_images(color, depth, frame_number, fps):
     fps = 0 if not np.isfinite(fps) else fps
     color_image = cv2.cvtColor(color, cv2.COLOR_BGR2RGB)
     depth_colormap = cv2.applyColorMap(cv2.convertScaleAbs(depth, alpha=0.03), cv2.COLORMAP_JET)

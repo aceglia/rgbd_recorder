@@ -1,60 +1,78 @@
 import os
-import time
-import numpy as np
-import cv2
 import threading
-import queue
+from pytrigno import TrignoSDKClient
+from biosiglive import save
+
+class Sensor:
+    def __init__(self):
+        self.name = None
+        self.type = None
+        self.rate = None
+        self.idx = None
+    
+    def from_dict(self, data):
+        self.name = data.get("name", None)
+        self.type = data.get("data_type", None)
+        self.idx = data.get("sensor_idx", None)
 
 
 class DelsysRecorder:
     def __init__(self, save_directory, config: dict):
         self.save_directory_base = save_directory
         self.save_directory = os.path.join(save_directory, "delsys_data")
+        self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
+        self.config = config
+        self._from_config()
+        self.sensors = []
 
-    def init_delsys(self, devices, ip="127.0.0.1", delsys_queue=None):
-        pass
+    def _from_config(self):
+        self.adress = self.config.get("delsys_adress", "127.0.0.1")
+        for device in self.config.get("devices", []):
+            sensor = Sensor()
+            sensor.from_dict(device)
+            self.sensors.append(sensor)
 
-    def get_delsys(self, devices, ip="127.0.0.1", delsys_queue=None):
-        if self.use_trigger:
-            self.init_trigger(ip)
-            self.interface.init_client()
-            self.interface.get_frame()
-            self.interface.add_device(
-                nb_channels=1,
-                name=chanel_name,
-                rate=2000,
+    def init_delsys(self, adress="127.0.0.1"):
+        self.sdk_client = TrignoSDKClient(ip=adress)
+        self.sdk_client.connect()
 
-            )
-            comparator_func = np.less if less else np.greater
-            
-        init_time = time.time()
-        self.event_started[0].set()
-        is_started=False
-        count = 0
-        while True:
-            if self.use_trigger:
-                trigger_data = self.interface.get_device_data(device_name="trigger")
-                if trigger_data is None:
-                    continue
-                queue_trig.put_nowait(trigger_data[0])
-                is_triggered = np.argwhere(comparator_func(trigger_data[0], threeshold) == True).shape[0]
-                if is_triggered and not self.trigger_start_event.is_set():
-                    self.trigger_start_event.set()
-                    print("start recording...")
-                if self.trigger_start_event.is_set() and count < 150:
-                    count += 1
-                elif is_triggered and self.trigger_start_event.is_set() and count > 100:
-                    self.trigger_stop_event.set()
-                    print("stop recording...")
-                    break
-            else:
-                time.sleep(0.005)
-                delay = time.time() - init_time
-                if not is_started and delay > self.start_delay:
-                    self.trigger_start_event.set()
-                    print("start recording...")
-                    init_time = time.time()
-                    is_started = True
-                elif delay > self.stop_delay and is_started:
-                        self.trigger_stop_event.set()
-                        break
+    def run_delsys(self, plot_delsys_queue, trigger_start_event, trigger_stop_event, stop_event, exception_queue):
+        self.plot_queue = plot_delsys_queue
+        self.stop_envent = stop_event
+        self.trigger_start_event = trigger_start_event
+        self.trigger_stop_event = trigger_stop_event
+        self.sensors_names = [s.name for s in self.sensors]
+        try:
+            if not self.sdk_client.is_connected:
+                self.init_delsys(self.adress)
+            self._listen_threads()
+        except Exception as e:
+            exception_queue.put(e)
+
+    def _listen_threads(self):
+        self.threads = []
+        for name, queue in self.sdk_client.all_queue.items():
+            if queue is None:
+                continue
+            thread = threading.Thread(target=self._listen_queue, args=(queue, name), daemon=True)
+            thread.start()
+
+    def _listen_queue(self, queue, name):
+        while self.trigger_stop_event.is_set() is False:
+            try:
+                data = queue.get(timeout=2)
+                self._process_data(data, name)
+            except Exception as e:
+                continue
+
+    def _process_data(self, data, name):
+        data, timestamp = data
+        self.plot_queue.put_nowait(data)
+        if self.trigger_start_event.is_set():
+            self._save_data(data, name, timestamp)
+    
+    def _save_data(self, data, name, timestamp):
+        save({f"{name}": data, "timestamp": timestamp, 'channel_names': self.sensors_names},
+              self.save_file_path,
+                add_data=True)
+

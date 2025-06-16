@@ -36,6 +36,7 @@ class DelsysConfiguration(QWidget):
         self.queue = mp.Queue()
         self.table_widget = None
         self._create_layout()
+        self.list_device = list(range(1, 17))
     
     def _create_layout(self):
         self.delsys_adress_label = QLabel("Delsys adress:")
@@ -150,6 +151,24 @@ class DelsysConfiguration(QWidget):
                         int(self.table_widget.cellWidget(i, 1).currentIndex()),
                         DelsysType(self.table_widget.cellWidget(i, 2).currentText().lower()).value) for i in range(self.table_widget.rowCount())]
         return [device.get_dict() for device in self.devices]
+
+    def check_same_idx(self):
+        all_idx = [device['sensor_idx'] for device in self.get_devices()]
+        duplicates = [i for i in set(all_idx) if all_idx.count(i) > 1]
+        if duplicates:
+            self.popup_duplicate_idx()
+            return False
+        return True
+    
+    def popup_duplicate_idx(self):
+        wind = QMessageBox()
+        wind.setText("Duplicate in Delsys sensor index detected. Please do not select the same channel for multiple devices.")
+        wind.setWindowTitle("Duplicate")
+        wind.setIcon(QMessageBox.Critical)
+        wind.setStandardButtons(QMessageBox.Ok)
+        wind.setDefaultButton(QMessageBox.Ok) 
+        wind.buttonClicked.connect(lambda: wind.close())
+        wind.exec_()
 
 
     

@@ -68,13 +68,14 @@ class DymmyReccorder(QMainWindow):
 
 
 class Display(QTabWidget):
-    def __init__(self, config_file):
+    def __init__(self, config_file, log_box):
         super().__init__()
         self.queue_current_tab = mp.Queue()
         # get current tab index
         # self.currentChanged.connect(self.on_current_tab)
         # self.currentChanged.connect(self.on_curent_tab)
         self.setTabsClosable(False)
+        self.log_box = log_box
 
         self.on_curent_tab = config_file
         with open(config_file, 'r') as f:
@@ -82,9 +83,11 @@ class Display(QTabWidget):
 
         self.init_tab_layout(self.config)
     
-    def run(self, color_array, depth_array, queue_trigger, queue_delsys):
-        size_rgbd = (3, 460, 848)
-        depth_shape = (460, 848)
+    def run(self, color_array, depth_array, queue_trigger, queue_delsys, timer):
+        res = self.config["RGBD"]['image_res'].split('x')
+        w, h = int(res[1]), int(res[0]) 
+        size_rgbd = (3, w, h)
+        depth_shape = (w, h)
         shared_color = np.frombuffer(color_array, dtype=np.uint8).reshape(size_rgbd)
         shared_depth = np.frombuffer(depth_array, dtype=np.uint16).reshape(depth_shape)
         for tab in self.tabs:
@@ -94,12 +97,13 @@ class Display(QTabWidget):
                 tab.set_data(queue_trigger)
             elif tab.name == 'delsys':
                 tab.set_data(queue_delsys)
+        self.timer_plot.timeout.connect(self.start_timer)
 
-
+    def start_timer(self):
+        self.tabs[self.currentIndex()].update_plot()
 
     def print_idx(self):
         print(self.currentIndex())
-
 
     def init_tab_layout(self, config):
         self.tabs = []
@@ -108,7 +112,11 @@ class Display(QTabWidget):
     
     def _append_tab(self, tab_name, tab_content):
         tab_name = tab_name.lower()
-        tab = ImageTab if tab_name == 'rgbd' else CurveTab
+        curve_tab_names = ["trigger", "delsys"]
+        image_tab_names = ["rgbd"]
+        if tab_name not in curve_tab_names and tab_name not in image_tab_names:
+            return
+        tab = CurveTab if tab_name in curve_tab_names else ImageTab
         self.tabs.append(tab(tab_name, tab_content))
         self.addTab(self.tabs[-1], tab_name)
 

@@ -28,6 +28,7 @@ class ConfigurationWindow(QWidget):
         self.rgbd_tab = None
         self.export_tab = None
         self.is_initialized = False
+        self.tabs = []
 
         self.tab_widget = CustomTabWidget(self)
         self.tab_widget.setTabsClosable(True)
@@ -132,6 +133,13 @@ class ConfigurationWindow(QWidget):
         self.tab_widget.addTab(self.delsys_tab, "Delsys")
 
     def save_config(self, save_as=False):
+        close = True
+        if self.delsys_tab is not None:
+            close = self.delsys_tab.check_same_idx()
+
+        if not close:
+            return
+        
         if self.config_path is not None and not save_as:
             return self.save_config_file()
         return SaveDialog(
@@ -154,6 +162,13 @@ class ConfigurationWindow(QWidget):
         return [self.tab_widget.tabText(i) for i in range(self.tab_widget.count())]
     
     def close_window(self):
+        close = True
+        if self.delsys_tab is not None:
+            close = self.delsys_tab.check_same_idx()
+
+        if not close:
+            return
+
         self.close()
         if self.config_path:
             self.load_config_file(self.config_path)

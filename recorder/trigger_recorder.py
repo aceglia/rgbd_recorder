@@ -1,4 +1,4 @@
-from biosiglive import ViconClient
+from biosiglive import ViconClient, save
 import time
 import numpy as np
 import os
@@ -8,54 +8,57 @@ class TriggerRecorder:
     def __init__(self, save_directory, config: dict):
         self.save_directory_base = save_directory
         self.save_directory = os.path.join(save_directory, "trigger_data")
-        self.use_trigger = True
+        self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
+        self.config = config
+        self._from_config()
     
-    def init_trigger(self, ip="127.0.0.1"):
+    def _from_config(self):
+        self.trigger_channel = self.config["trigger_channel"]
+        self.ip = self.config['vicon_adress']
+        self.vicon_port = self.config['vicon_port']
+        self.threeshold = self.config['trigger_threeshold']
+        self.less = self.config["condition"] == "lesser than"
 
-        if not self.use_trigger:
-            return
-        
-        self.interface = ViconClient(ip=ip, init_now=True)
+    def _init_trigger(self):
+        self.interface = ViconClient(ip=self.ip, port=self.vicon_port, init_now=True)
 
-
-    def get_trigger(self, chanel_name="trigger", threeshold=5.215, ip="127.0.0.1", less=True, queue_trig=None):
-        if self.use_trigger:
-            self.init_trigger(ip)
-            self.interface.get_frame()
-            self.interface.add_device(
-                nb_channels=1,
-                name=chanel_name,
-            )
-            comparator_func = np.less if less else np.greater
-            
-        init_time = time.time()
-        self.event_started[0].set()
-        is_started=False
-        count = 0
-        while True:
+    def get_trigger(self, event_started, trigger_start_event, trigger_stop_event, queue_trig=None, exception_queue=None, stop_event=None):
+        try:
             if self.use_trigger:
-                trigger_data = self.interface.get_device_data(device_name="trigger")
-                if trigger_data is None:
-                    continue
-                queue_trig.put_nowait(trigger_data[0])
-                is_triggered = np.argwhere(comparator_func(trigger_data[0], threeshold) == True).shape[0]
-                if is_triggered and not self.trigger_start_event.is_set():
-                    self.trigger_start_event.set()
-                    print("start recording...")
-                if self.trigger_start_event.is_set() and count < 150:
-                    count += 1
-                elif is_triggered and self.trigger_start_event.is_set() and count > 100:
-                    self.trigger_stop_event.set()
-                    print("stop recording...")
-                    break
-            else:
-                time.sleep(0.005)
-                delay = time.time() - init_time
-                if not is_started and delay > self.start_delay:
-                    self.trigger_start_event.set()
-                    print("start recording...")
-                    init_time = time.time()
-                    is_started = True
-                elif delay > self.stop_delay and is_started:
-                        self.trigger_stop_event.set()
+                self._init_trigger()
+                self.interface.get_frame()
+                self.interface.add_device(
+                    nb_channels=1,
+                    name=self.trigger_channel,
+                )
+                comparator_func = np.less if self.less else np.greater
+            self.counter = time.perf_counter
+            event_started.set()
+            count = 0
+            while True:
+                if self.use_trigger:
+                    trigger_data = self.interface.get_device_data(device_name=self.trigger_channel)
+                    if trigger_data is None:
+                        continue
+                    queue_trig.put_nowait(trigger_data[0], self.counter())
+                    is_triggered = np.argwhere(comparator_func(trigger_data[0], self.threeshold) == True).shape[0]
+                    if is_triggered and not self.trigger_start_event.is_set():
+                        trigger_start_event.set()
+                        exception_queue.put_nowait("start recording...")
+                    if trigger_start_event.is_set() and count < 150:
+                        count += 1
+                    elif is_triggered and trigger_start_event.is_set() and count > 100:
+                        trigger_stop_event.set()
+                        print("stop recording...")
                         break
+                if stop_event.is_set():
+                    break
+        except Exception as e:
+            exception_queue.put_nowait(e)
+
+    def _process_data(self, data, timestamp):
+        if self.use_trigger:
+            save({'trigger': data, "timestamp": timestamp}, self.save_file_path)
+
+        return data
+                        

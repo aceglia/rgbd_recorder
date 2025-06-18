@@ -15,7 +15,7 @@ class TriggerWindow(QWidget):
         return {
             "vicon_adress": self.vicon_adress,
             "vicon_port": self.vicon_port,
-            "trigger_chanel": self.trigger_chanel,
+            "trigger_channel": self.trigger_chanel,
             "trigger_threshold": self.trigger_thres,
             "condition": self.condition,
             }
@@ -23,7 +23,7 @@ class TriggerWindow(QWidget):
     def from_dict(self, d):
         self.vicon_adress_input.setText(d["vicon_adress"])
         self.vicon_port_input.setText(str(d["vicon_port"]))
-        self.trigger_chanel_input.setText(d["trigger_chanel"])
+        self.trigger_chanel_input.setText(d["trigger_channel"])
         self.trigger_thres_input.setText(str(d["trigger_threshold"]))
         self.condition_input.setCurrentText(d["condition"])
 
@@ -74,7 +74,7 @@ class TriggerWindow(QWidget):
     
     @property
     def trigger_thres(self):
-        return int(self.trigger_thres_input.text())
+        return float(self.trigger_thres_input.text())
     
     @property
     def condition(self):

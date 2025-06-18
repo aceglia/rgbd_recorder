@@ -9,17 +9,18 @@ from utils import set_shared_memory_images, show_cv2_images
 
 
 class RgbdRecorder:
-    def __init__(self, config: dict):
+    def __init__(self, save_directory_base, config: dict):
+        self.save_directory_base = save_directory_base
         self.config = config
         self._from_config()
         self.save_directory = os.path.join(self.save_directory_base, "rgbd_data")
-        self.log_file = os.path.join(self.save_directory_base, "log.txt")
-
+        self.log_file = os.path.join(self.save_directory, "log.txt")
+        self.date_time = time.strftime("%Y%m%d_%H%M%S")
     
     def _from_config(self):
-        self.save_directory_base = self.config["Export"]["save_directory_base"]
-        self.size = self.config["image_res"]
-        self.fps = self.config["fps"]
+        self.size = self.config["image_res"].split("x")
+        self.size = (int(self.size[0]), int(self.size[1]))
+        self.fps = int(self.config["camera_fps"])
 
     def init_camera_pipeline(self):
         self.pipeline = rs.pipeline()
@@ -28,8 +29,8 @@ class RgbdRecorder:
         pipeline_profile = config.resolve(pipeline_wrapper)
         device = pipeline_profile.get_device()
         device_product_line = str(device.get_info(rs.camera_info.product_line))
-        config.enable_stream(rs.stream.depth, self.size[1], self.size[0], rs.format.z16, self.fps)
-        config.enable_stream(rs.stream.color, self.size[1], self.size[0], rs.format.bgr8, self.fps)
+        config.enable_stream(rs.stream.depth, self.size[0], self.size[1], rs.format.z16, self.fps)
+        config.enable_stream(rs.stream.color, self.size[0], self.size[1], rs.format.bgr8, self.fps)
         # config.enable_record_to_file('test.bag')
         self.pipeline.start(config)
         d_profile = self.pipeline.get_active_profile().get_stream(rs.stream.depth).as_video_stream_profile()
@@ -102,7 +103,7 @@ class RgbdRecorder:
             shared_color = np.frombuffer(shared_color, dtype=np.uint8).reshape(color_shape)
             shared_depth = np.frombuffer(shared_depth, dtype=np.uint16).reshape(depth_shape)
             # path = f"{self.save_directory}\{self.participant}\{self.file_name}_{self.date_time}"
-            path = save_path
+            path = os.path.join(save_path, "rgbd_data")
             os.makedirs(path, exist_ok=True)
             event_started.set()
             count = 0
@@ -134,48 +135,52 @@ class RgbdRecorder:
         for event in event_list:
             event.wait()
 
-    def get_rgbd(self, shared_color, shared_depth, trigger_start_event, trigger_stop_event, frame_queue, exception_queue, stop_event, event_started):
-        try:
-            shared_color = np.frombuffer(shared_color, dtype=np.uint8).reshape((self.color_shape))
-            shared_depth = np.frombuffer(shared_depth, dtype=np.uint16).reshape((self.depth_shape))
-            if not self.from_bag_file:
-                self.init_camera_pipeline()
-            else:
-                self._init_bag_file()
-            loop_time_list = []
-            buffer_idx = 0
-            count = 0
-            event_started.set()
-            self.counter = time.perf_counter()
-            while True:
-                if trigger_stop_event.is_set():
-                    break
-                tic = time.time()
-                color_image, depth_image, frame_number = self._get_images()
-                timestamp = self.counter()
-                if color_image is None:
-                    continue
-                fps = 1 / np.mean(loop_time_list[-20:])
-                # show_cv2_images(color_image, depth_image, frame_number, fps)
-                # if not self.trigger_start_event.is_set() and self.show_images:
-                #     fps = 1 / np.mean(loop_time_list[-20:])
-                #     self.show_cv2_images(color_image, depth_image, frame_number, fps)
-                if trigger_start_event.is_set():
-                    # if count == 0:
-                    #     cv2.destroyAllWindows()
-                    buffer_idx = frame_number % self.buffer_size
-                    set_shared_memory_images(shared_color, shared_depth, color_image, depth_image, buffer_idx)
-                    frame_queue.put_nowait((frame_number, buffer_idx))
-                    self.save_log(frame_number, timestamp)
-                    count += 1
-                loop_time_list.append(time.time() - tic)
-                if stop_event.is_set():
-                    break
-                
-            self.pipeline.stop()
+    def get_rgbd(self, shared_color, shared_depth, color_shape, depth_shape,trigger_start_event, trigger_stop_event, frame_queue, exception_queue, stop_event, event_started,
+                  plot_queue):
+        # try:
+        buffer_size = color_shape[-1]
+        shared_color = np.frombuffer(shared_color, dtype=np.uint8).reshape(color_shape)
+        shared_depth = np.frombuffer(shared_depth, dtype=np.uint16).reshape(depth_shape)
+        self.init_camera_pipeline()
+        loop_time_list = []
+        buffer_idx = 0
+        count = 0
+        # self.wait_all(event_started)
+        self.counter = time.perf_counter
+        while True:
+            if trigger_stop_event.is_set():
+                break
+            tic = time.time()
+            color_image, depth_image, frame_number = self._get_images()
+            timestamp = self.counter()
+            if color_image is None:
+                continue
+            # fps = 1 / np.mean(loop_time_list[-20:])
+            # show_cv2_images(color_image, depth_image, frame_number, fps)
+            # if not self.trigger_start_event.is_set() and self.show_images:
+            #     fps = 1 / np.mean(loop_time_list[-20:])
+            #     self.show_cv2_images(color_image, depth_image, frame_number, fps)
+            buffer_idx = frame_number % buffer_size
+            set_shared_memory_images(shared_color, shared_depth, color_image, depth_image, buffer_idx)
+            try:
+                plot_queue.get_nowait()
+            except:
+                pass
+            plot_queue.put_nowait((frame_number, buffer_idx))
+            count += 1
 
-        except Exception as e:
-            exception_queue.put_nowait(e)
+            if trigger_start_event.is_set():
+                frame_queue.put_nowait((frame_number, buffer_idx))
+                self.save_log(frame_number, timestamp)
+            loop_time_list.append(time.time() - tic)
+            if stop_event.is_set():
+                break
+            
+        self.pipeline.stop()
+
+        # except Exception as e:
+        #     print(f"Exception in get_rgbd: {e}")
+        #     exception_queue.put_nowait(e)
 
     def save_log(self, frame_number, timestamp):
         with open(self.log_file, "a") as f:

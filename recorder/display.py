@@ -77,30 +77,21 @@ class Display(QTabWidget):
         self.setTabsClosable(False)
         self.log_box = log_box
 
-        self.on_curent_tab = config_file
         with open(config_file, 'r') as f:
             self.config = json.load(f)
 
         self.init_tab_layout(self.config)
     
-    def run(self, color_array, depth_array, queue_trigger, queue_delsys, timer):
-        res = self.config["RGBD"]['image_res'].split('x')
-        w, h = int(res[1]), int(res[0]) 
-        size_rgbd = (3, w, h)
-        depth_shape = (w, h)
-        shared_color = np.frombuffer(color_array, dtype=np.uint8).reshape(size_rgbd)
+    def run(self, color_array, depth_array, color_shape, depth_shape, queue_frame, queue_trigger, queue_delsys, timer):
+        shared_color = np.frombuffer(color_array, dtype=np.uint8).reshape(color_shape)
         shared_depth = np.frombuffer(depth_array, dtype=np.uint16).reshape(depth_shape)
         for tab in self.tabs:
             if tab.name == 'rgbd':
-                tab.set_data(shared_color, shared_depth)
+                tab.set_data(shared_color, shared_depth, queue_frame)
             elif tab.name == 'trigger':
                 tab.set_data(queue_trigger)
             elif tab.name == 'delsys':
                 tab.set_data(queue_delsys)
-        self.timer_plot.timeout.connect(self.start_timer)
-
-    def start_timer(self):
-        self.tabs[self.currentIndex()].update_plot()
 
     def print_idx(self):
         print(self.currentIndex())

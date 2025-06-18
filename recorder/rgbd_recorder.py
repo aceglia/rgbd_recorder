@@ -104,7 +104,7 @@ class RgbdRecorder:
             # path = f"{self.save_directory}\{self.participant}\{self.file_name}_{self.date_time}"
             path = save_path
             os.makedirs(path, exist_ok=True)
-            event_started[i].set()
+            event_started.set()
             count = 0
             while True:
                 try:
@@ -145,7 +145,7 @@ class RgbdRecorder:
             loop_time_list = []
             buffer_idx = 0
             count = 0
-            self.wait_all(event_started)
+            event_started.set()
             self.counter = time.perf_counter()
             while True:
                 if trigger_stop_event.is_set():

@@ -36,7 +36,7 @@ class DelsysRecorder:
         self.sdk_client = TrignoSDKClient(ip=adress)
         self.sdk_client.connect()
 
-    def run_delsys(self, plot_delsys_queue, trigger_start_event, trigger_stop_event, stop_event, exception_queue):
+    def run_delsys(self, event_started, plot_delsys_queue, trigger_start_event, trigger_stop_event, stop_event, exception_queue):
         self.plot_queue = plot_delsys_queue
         self.stop_envent = stop_event
         self.trigger_start_event = trigger_start_event
@@ -46,6 +46,7 @@ class DelsysRecorder:
             if not self.sdk_client.is_connected:
                 self.init_delsys(self.adress)
             self._listen_threads()
+            event_started.set()
         except Exception as e:
             exception_queue.put(e)
 

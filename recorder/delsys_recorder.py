@@ -48,7 +48,7 @@ class DelsysRecorder:
         self.trigger_stop_event = trigger_stop_event
         self.sensors_names = [s.name for s in self.sensors]
         try:
-            if not self.sdk_client.is_connected:
+            if not self.sdk_client:
                 self.init_delsys(self.adress)
             self._listen_threads()
             event_started.set()

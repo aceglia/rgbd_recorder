@@ -55,6 +55,8 @@ class GUI(QMainWindow):
         self.log_box = None
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
+        self.configuration = ConfigurationWindow(parent=self, log_box=self.log_box)
+
         self._init_layout()
         self.running = False
 
@@ -69,7 +71,6 @@ class GUI(QMainWindow):
         self.refresh_plot = 16  # refresh plot at 60 Hz
         self.buffer_size = 20
 
-        self.configuration = ConfigurationWindow(parent=self, log_box=self.log_box)
 
         self._create_menu_bar()
         self.trig_tab = None
@@ -197,24 +198,20 @@ class GUI(QMainWindow):
         while True:
             try:
                 self.log(self.log_queue.get(timeout=0.5))
+                if self.stop_event.is_set() or self.trigger_stop_event.is_set():
+                    self.stop()
+                    break
             except:
                 continue
 
     def start(self):
         self.menu_bar.disable_run_menu()
+        self.menu_bar.file_menu.setEnable(False)
         self.running = True
         self.start_button.setEnabled(True)
         self.save_directory_base = self.configuration.get_save_directory()
 
-        item = self.central_widget.layout().itemAt(0).widget()
-        item.setParent(None)
-        self.central_widget.layout().removeWidget(item)
-
-        self.display = Display(self.configuration.config_path, log_box=self.log_box)
-        splitter = QSplitter(Qt.Vertical)
-        splitter.addWidget(self.display)
-        splitter.addWidget(self.log_box)
-        self.central_widget.layout().insertWidget(0, splitter)
+        self._insert_display_widget()
 
         self.log("Starting processes...")
 
@@ -243,20 +240,22 @@ class GUI(QMainWindow):
 
         if self.configuration.delsys_tab is not None:
             p = mp.Process(target=GUI.run_delsys,
-                            args=(self.save_directory_base, self.configuration.delsys_tab.get_dict(),
+                            args=(self.save_directory_base, self.event_started[event_count], self.configuration.delsys_tab.get_dict(),
                                   self.trigger_start_event,
                                                     self.trigger_stop_event,
                                                    self.stop_event, 
                                   self.delsys_queue, self.log_queue,), daemon=True, name="save_delsys")
             self.processes.append(p)    
+            event_count += 1
 
         if self.configuration.trig_tab is not None:
             p = mp.Process(target=GUI.get_trigger,
-                            args=(self.save_directory_base, self.configuration.trig_tab.get_dict(),
-                                  self.event_started, self.trigger_start_event, self.trigger_stop_event, self.stop_event, self.log_queue,
+                            args=(self.save_directory_base, self.event_started[event_count], self.configuration.trig_tab.get_dict(),
+                                   self.trigger_start_event, self.trigger_stop_event, self.stop_event, self.log_queue,
                                     self.trigger_queue,),
                             daemon=True, name="trigger")
             self.processes.append(p)
+            event_count += 1
 
         self.log("Starting display...")
         self.display.run(color_array, depth_array, color_shape, depth_shape, self.plot_frame_queue, self.trigger_queue, self.delsys_queue, self.timer_plot)
@@ -267,22 +266,41 @@ class GUI(QMainWindow):
         for p in self.processes:
             p.start()
 
-    
     def start_timer(self):
         self.display.tabs[self.display.currentIndex()].update_plot()
+
+    def _insert_display_widget(self, display=True):
+        item = self.central_widget.layout().itemAt(0).widget()
+        item.setParent(None)
+        self.central_widget.layout().removeWidget(item)
+        if display:
+            self.display = Display(self.configuration.config_path, log_box=self.log_box)
+            widget=self.display
+        else:
+            widget = QWidget()
+        splitter = QSplitter(Qt.Vertical)
+        splitter.addWidget(widget)
+        splitter.addWidget(self.log_box)
+        self.central_widget.layout().insertWidget(0, splitter)
 
     def stop(self):
         if not self.running:
             return
         self.running = False
         self.stop_event.set()
+        for event in self.event_started:
+            event.clear()
         for p in self.processes:
             p.join()
+        
         self.log("All processes stopped.")
+        self._insert_display_widget(display=False)
         self.menu_bar.enable_run_menu()
         self.menu_bar.run.setEnabled(True)
         self.menu_bar.configuration_menu.setEnabled(True)
         self.menu_bar.stop.setEnable(False)
+        self.stop_button.setEnabled(False)
+        self.start_button.setEnabled(True)
 
     def quit(self):
         self.stop()
@@ -302,12 +320,12 @@ class GUI(QMainWindow):
                            frame_queue, log_queue, stop_event, event_started, plot_queue)
     
     @staticmethod
-    def run_delsys(save_directory_base, config_dict, trigger_start_event,trigger_stop_event, stop_event, delsys_queue, log_queue):
+    def run_delsys(save_directory_base, event_started, config_dict, trigger_start_event,trigger_stop_event, stop_event, delsys_queue, log_queue):
         delsys = DelsysRecorder(save_directory_base, config_dict)
-        delsys.run_delsys(delsys_queue, trigger_start_event,trigger_stop_event, stop_event, log_queue)
+        delsys.run_delsys(event_started, delsys_queue, trigger_start_event,trigger_stop_event, stop_event, log_queue)
     
     @staticmethod
-    def get_trigger(save_directory_base, config_dict, event_started,
+    def get_trigger(save_directory_base, event_started, config_dict, 
                                                   trigger_start_event,
                                                     trigger_stop_event, stop_event, log_queue, plot_queue):
         trigger = TriggerRecorder(save_directory_base, config=config_dict)

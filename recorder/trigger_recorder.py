@@ -40,6 +40,7 @@ class TriggerRecorder:
         self.counter = time.perf_counter
         count = 0
         os.makedirs(self.save_directory, exist_ok=True)
+        event_started.set()
         while True:
             trigger_data = self.interface.get_device_data(device_name=self.trigger_channel)
             if trigger_data is None:

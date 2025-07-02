@@ -19,7 +19,7 @@ class Sensor:
 class DelsysRecorder:
     def __init__(self, save_directory, config: dict):
         self.trial_queue = save_directory
-        self.save_directory_base = self.trial_queue.get()
+        self.save_directory_base = self.trial_queue.get(timeout=0.5)
         self.trial_queue.put_nowait(self.save_directory_base)
         self.save_directory = os.path.join(self.save_directory_base, "delsys_data")
         self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
@@ -88,7 +88,6 @@ class DelsysRecorder:
                 elif self.trigger_stop_event.is_set():
                     if stop_count == 0:
                         save_dir = trial_queue.get()
-                        print(save_dir)
                         trial_queue.put_nowait(save_dir)
                         self.save_directory = os.path.join(save_dir, "delsys_data")
                         self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")

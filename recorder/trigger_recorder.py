@@ -50,10 +50,10 @@ class TriggerRecorder:
                 pass
             queue_trig.put_nowait(trigger_data[0])
             is_triggered = np.argwhere(comparator_func(trigger_data[0], self.threeshold) == True).shape[0]
-            if is_triggered and not trigger_start_event.is_set():
-                trigger_start_event.set()
-                exception_queue.put_nowait("start recording...")
-            if is_triggered and trigger_start_event.is_set():
+            if is_triggered:
+                if not trigger_stop_event.is_set():
+                    trigger_start_event.set()
+                    exception_queue.put_nowait("start recording...")
                 self._process_data(trigger_data[0], timestamp)
             if trigger_start_event.is_set() and count < 150:
                 count += 1

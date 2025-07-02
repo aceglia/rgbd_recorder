@@ -69,9 +69,8 @@ class GUI(QMainWindow):
         self.trigger_start_event = None
         self.trigger_stop_event = None
 
-        self.refresh_plot = 16  # refresh plot at 60 Hz
+        self.refresh_plot = 16 
         self.buffer_size = 20
-
 
         self._create_menu_bar()
         self.trig_tab = None
@@ -104,15 +103,10 @@ class GUI(QMainWindow):
         splitter_hor.addWidget(self.start_button)
         splitter_hor.addWidget(self.stop_button)
 
-        # main_layout = QGridLayout()
         main_layout = QVBoxLayout()
         main_layout.addWidget(splitter)
         main_layout.addWidget(splitter_hor)
         main_layout.addWidget(self.clear_log_button)
-        # main_layout.addWidget(splitter, 0, 0, 1, 2)
-        # main_layout.addWidget(self.start_button, 1, 0)
-        # main_layout.addWidget(self.stop_button, 1, 1)
-        # main_layout.addWidget(self.clear_log_button, 2, 0, 1, 2)
         self.central_widget.setLayout(main_layout)
         
     def start_recording(self):
@@ -277,7 +271,10 @@ class GUI(QMainWindow):
         self.log("Starting display...")
         self.display.run(color_array, depth_array, color_shape, depth_shape, self.plot_frame_queue, self.trigger_queue, self.delsys_emg_queue_display, self.delsys_aux_queue_display,  self.timer_plot)
 
+        self.log("Processes started.")
+        self.log("Waiting for processes to start...")
         self.timer_plot.start()
+        self.log("Processes started, you can start recording.")
 
     def start_timer(self):
         self.display.tabs[self.display.currentIndex()].update_plot()
@@ -329,10 +326,9 @@ class GUI(QMainWindow):
                                                   frame_queue,
                                                   trigger_start_event,
                                                     trigger_stop_event, stop_event, config_dict, color_shape, depth_shape, log_queue, plot_queue):
-        # recorder = RgbdRecorder(save_directory_base, config_dict)
-        # recorder.get_rgbd(color_array, depth_array, color_shape, depth_shape, trigger_start_event,trigger_stop_event, 
-        #                    frame_queue, log_queue, stop_event, event_started, plot_queue)
-        pass
+        recorder = RgbdRecorder(save_directory_base, config_dict)
+        recorder.get_rgbd(color_array, depth_array, color_shape, depth_shape, trigger_start_event,trigger_stop_event, 
+                           frame_queue, log_queue, stop_event, event_started, plot_queue)
 
     @staticmethod
     def run_delsys(save_directory_base, event_started, config_dict, trigger_start_event,trigger_stop_event, stop_event, delsys_queue_emg, delsys_queue_aux, log_queue):

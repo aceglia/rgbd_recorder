@@ -107,8 +107,10 @@ class RgbdRecorder:
             shared_color = np.frombuffer(shared_color, dtype=np.uint8).reshape(color_shape)
             shared_depth = np.frombuffer(shared_depth, dtype=np.uint16).reshape(depth_shape)
             # path = f"{self.save_directory}\{self.participant}\{self.file_name}_{self.date_time}"
-            
-            path = os.path.join(save_path.get(), "rgbd_data")
+            dir = save_path.get()
+            save_path.put_nowait(dir)
+            path = os.path.join(dir, "rgbd_data")
+
             os.makedirs(path, exist_ok=True)
             event_started.set()
             count = 0

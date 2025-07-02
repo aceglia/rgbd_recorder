@@ -23,17 +23,24 @@ class ConfigurationWindow(QWidget):
         self.config_path = None
         self.configuration_dict = {}
         self.log_box = log_box
-        self.trig_tab = None
-        self.delsys_tab = None
-        self.rgbd_tab = None
-        self.export_tab = None
+
         self.is_initialized = False
-        self.tabs = []
 
         self.tab_widget = CustomTabWidget(self)
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self.tab_widget.removeTab)
-        
+
+        self._init_tabs()
+
+    
+    def _init_tabs(self):
+        self.trig_tab = None
+        self.delsys_tab = None
+        self.rgbd_tab = None
+        self.export_tab = None
+        self.tabs = []
+        self.tab_widget.clear()
+
     def init_config(self):
         self.setWindowTitle("Configuration")
         self.ok_button = QPushButton("OK")
@@ -58,6 +65,7 @@ class ConfigurationWindow(QWidget):
         try:
             with open(file_path, "r") as f:
                 data = json.load(f)
+            self._init_tabs()
             self.config_path = file_path
             self.configuration_dict = data
             self.create_rgbd_tab()

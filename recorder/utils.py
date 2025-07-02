@@ -40,12 +40,10 @@ class CustomTabWidget(QTabWidget):
     def removeTab(self, index):
         tab_name = self.tabText(index)
         super().removeTab(index)
-        if tab_name == 'RGBD':
-            self.parent.rgbd_tab = None
-        elif tab_name == 'Trigger settings':
+        if tab_name == 'Trigger':
             self.parent.trig_tab = None
-        elif tab_name == 'Delsys Gogniometer':
-            self.parent.gognio_tab = None
+        elif tab_name == 'Delsys':
+            self.parent.delsys_tab = None
         self.parent.log(f"Settings for {tab_name} has been removed.")
 
 

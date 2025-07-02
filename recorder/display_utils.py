@@ -30,7 +30,7 @@ class CurveTab(Tab):
         self.name = name
         if name == 'trigger':
             self.nb_channels = [1]
-            self.channel_names = ["trigger"]
+            self.channel_names = [["trigger"]]
         else:
             self.nb_emg =0
             self.nb_aux = 0
@@ -74,6 +74,8 @@ class CurveTab(Tab):
         for queue, plot in zip(self.queues, self.plots):
             try:
                 data = queue.get_nowait()
+                if len(data.shape) == 1:
+                    data = data[None, :]
                 plot.update(data)
             except:
                 continue

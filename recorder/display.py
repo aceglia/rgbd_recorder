@@ -65,8 +65,6 @@ class DymmyReccorder(QMainWindow):
         self.diplay_process.join()
 
 
-
-
 class Display(QTabWidget):
     def __init__(self, config_file, log_box):
         super().__init__()
@@ -82,7 +80,7 @@ class Display(QTabWidget):
 
         self.init_tab_layout(self.config)
     
-    def run(self, color_array, depth_array, color_shape, depth_shape, queue_frame, queue_trigger, queue_delsys, timer):
+    def run(self, color_array, depth_array, color_shape, depth_shape, queue_frame, queue_trigger, queue_delsys_emg, queue_delsys_aux, timer):
         shared_color = np.frombuffer(color_array, dtype=np.uint8).reshape(color_shape)
         shared_depth = np.frombuffer(depth_array, dtype=np.uint16).reshape(depth_shape)
         for tab in self.tabs:
@@ -91,7 +89,7 @@ class Display(QTabWidget):
             elif tab.name == 'trigger':
                 tab.set_data(queue_trigger)
             elif tab.name == 'delsys':
-                tab.set_data(queue_delsys)
+                tab.set_data([queue_delsys_emg, queue_delsys_aux])
 
     def print_idx(self):
         print(self.currentIndex())

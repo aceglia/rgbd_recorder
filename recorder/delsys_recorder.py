@@ -1,7 +1,5 @@
 import os
 import threading
-
-from matplotlib.pyplot import plot
 from pytrigno import TrignoSDKClient
 from biosiglive import save
 
@@ -20,8 +18,10 @@ class Sensor:
 
 class DelsysRecorder:
     def __init__(self, save_directory, config: dict):
-        self.save_directory_base = save_directory
-        self.save_directory = os.path.join(save_directory, "delsys_data")
+        self.trial_queue = save_directory
+        self.save_directory_base = self.trial_queue.get()
+        self.trial_queue.put_nowait(self.save_directory_base)
+        self.save_directory = os.path.join(self.save_directory_base, "delsys_data")
         self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
         self.config = config
         self.sensors = []
@@ -41,12 +41,14 @@ class DelsysRecorder:
         self.sdk_client.connect()
         self.sdk_client.start_streaming()
 
-    def run_delsys(self, event_started, plot_delsys_queue, trigger_start_event, trigger_stop_event, stop_event, exception_queue):
-        self.plot_queue = plot_delsys_queue
-        self.stop_envent = stop_event
+    def run_delsys(self, event_started, plot_delsys_queue_emg, plot_delsys_queue_aux, trigger_start_event, trigger_stop_event, stop_event, exception_queue):
+        self.plot_queue_emg = plot_delsys_queue_emg
+        self.plot_queue_aux = plot_delsys_queue_aux
+        self.stop_event = stop_event
         self.trigger_start_event = trigger_start_event
         self.trigger_stop_event = trigger_stop_event
         self.sensors_names = [s.name for s in self.sensors]
+        os.makedirs(self.save_directory, exist_ok=True)
         try:
             if not self.sdk_client:
                 self.init_delsys(self.adress)
@@ -60,12 +62,18 @@ class DelsysRecorder:
         for name, socket in self.sdk_client.all_socket.items():
             if not socket:
                 continue
-            thread = threading.Thread(target=self._listen_queue, args=(self.sdk_client.all_queue[name], name), daemon=True)
+            thread = threading.Thread(target=self._listen_queue, args=(self.sdk_client.all_queue[name], name, self.trial_queue), daemon=True)
             thread.start()
+            self.threads.append(thread)
+    
+    def stop_threads(self):
+        for thread in self.threads:
+            thread.join()
 
-    def _listen_queue(self, queue, name):
-        plot_queue = self.plot_queue if "emg" in name else None
-        while self.trigger_stop_event.is_set() is False:
+    def _listen_queue(self, queue, name, trial_queue):
+        plot_queue = self.plot_queue_emg if "emg" in name else self.plot_queue_aux
+        stop_count = 0
+        while True:
             try:
                 data = queue.get(timeout=0.1)
                 if plot_queue is not None:
@@ -73,15 +81,30 @@ class DelsysRecorder:
                         plot_queue.get_nowait()
                     except:
                         pass
-                    plot_queue.put_nowait(data[0][data[0] != 0])
-                self._process_data(data, name)
+                    plot_queue.put_nowait(data[0])
+                if self.trigger_start_event.is_set():
+                    stop_count = 0
+                    self._process_data(data, name)
+                elif self.trigger_stop_event.is_set():
+                    if stop_count == 0:
+                        save_dir = trial_queue.get()
+                        print(save_dir)
+                        trial_queue.put_nowait(save_dir)
+                        self.save_directory = os.path.join(save_dir, "delsys_data")
+                        self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
+                        os.makedirs(self.save_directory, exist_ok=True)
+                        stop_count += 1
+                    else:
+                        pass
+
             except Exception as e:
                 continue
+            if self.stop_event.is_set():
+                break
 
     def _process_data(self, data, name):
         data, timestamp = data
-        if self.trigger_start_event.is_set():
-            self._save_data(data, name, timestamp)
+        self._save_data(data, name, timestamp)
     
     def _save_data(self, data, name, timestamp):
         save({f"{name}": data, "timestamp": timestamp, 'channel_names': self.sensors_names},

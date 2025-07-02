@@ -60,6 +60,7 @@ class LogBox(QPlainTextEdit):
 
     
 
+
     
 
 

@@ -1,17 +1,15 @@
-from operator import is_
-import queue
-from sqlite3.dbapi2 import Timestamp
 from biosiglive import ViconClient, save, DeviceType
 import time
 import numpy as np
 import os
 
 
-
 class TriggerRecorder:
     def __init__(self, save_directory, config: dict):
-        self.save_directory_base = save_directory
-        self.save_directory = os.path.join(save_directory, "trigger_data")
+        self.trial_queue = save_directory
+        self.save_directory_base = self.trial_queue.get()
+        self.trial_queue.put_nowait(self.save_directory_base)
+        self.save_directory = os.path.join(self.save_directory_base, "trigger_data")
         self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
         self.config = config
         self._from_config()
@@ -62,7 +60,13 @@ class TriggerRecorder:
             elif is_triggered and trigger_start_event.is_set() and count > 100:
                 trigger_stop_event.set()
                 print("stop recording...")
-                break
+                self.save_directory_base = self.trial_queue.get()
+                self.trial_queue.put_nowait(self.save_directory_base)
+                self.save_directory = os.path.join(self.save_directory_base, "trigger_data")
+                self.save_file_path = os.path.join(self.save_directory, f"_raw_data.bio")
+                exception_queue.put_nowait("stop recording...")
+                count = 0
+                trigger_start_event.clear()
             if stop_event.is_set():
                 break
         #     if stop_event.is_set():

@@ -1,4 +1,6 @@
+from operator import is_
 import time
+from tracemalloc import stop
 import pyrealsense2 as rs
 import numpy as np
 import cv2
@@ -10,7 +12,9 @@ from utils import set_shared_memory_images, show_cv2_images
 
 class RgbdRecorder:
     def __init__(self, save_directory_base, config: dict):
-        self.save_directory_base = save_directory_base
+        self.trial_queue = save_directory_base
+        self.save_directory_base = self.trial_queue.get()
+        self.trial_queue.put_nowait(self.save_directory_base)
         self.config = config
         self._from_config()
         self.save_directory = os.path.join(self.save_directory_base, "rgbd_data")
@@ -98,20 +102,33 @@ class RgbdRecorder:
         self.align = rs.align(align_to)
 
     @staticmethod
-    def save_rgbd_from_buffer(save_path, event_started, frame_queue, trigger_stop_event, shared_color, shared_depth, i, color_shape, depth_shape, exception_queue):
+    def save_rgbd_from_buffer(save_path, event_started, frame_queue, trigger_stop_event, shared_color, shared_depth, i, color_shape, depth_shape, exception_queue, stop_event):
         try:
             shared_color = np.frombuffer(shared_color, dtype=np.uint8).reshape(color_shape)
             shared_depth = np.frombuffer(shared_depth, dtype=np.uint16).reshape(depth_shape)
             # path = f"{self.save_directory}\{self.participant}\{self.file_name}_{self.date_time}"
-            path = os.path.join(save_path, "rgbd_data")
+            
+            path = os.path.join(save_path.get(), "rgbd_data")
             os.makedirs(path, exist_ok=True)
             event_started.set()
             count = 0
+            stop_count = 0
             while True:
                 try:
                     queue = frame_queue.get(timeout=0.005)
+                    stop_count = 0
                 except:
                     if trigger_stop_event.is_set():
+                        if stop_count == 0:
+                            save_dir = save_path.get()
+                            save_path.put_nowait(save_dir)
+                            path = os.path.join(save_dir, "rgbd_data")
+                            print(path)
+                            os.makedirs(path, exist_ok=True)
+                            stop_count += 1
+                        else:
+                            pass
+                    elif stop_event.is_set():
                         break
                     continue
                 count +=1
@@ -127,7 +144,6 @@ class RgbdRecorder:
                         f"{path}\color_{frame_number}.png",
                         cv2.cvtColor(color_image, cv2.COLOR_BGR2RGB),
                     )
-            print(f"{count} frame saved by the {i} process")
         except Exception as e:
             exception_queue.put_nowait(e)
 
@@ -148,7 +164,7 @@ class RgbdRecorder:
         # self.wait_all(event_started)
         self.counter = time.perf_counter
         while True:
-            if trigger_stop_event.is_set():
+            if stop_event.is_set():
                 break
             tic = time.time()
             color_image, depth_image, frame_number = self._get_images()
@@ -173,8 +189,6 @@ class RgbdRecorder:
                 frame_queue.put_nowait((frame_number, buffer_idx))
                 self.save_log(frame_number, timestamp)
             loop_time_list.append(time.time() - tic)
-            if stop_event.is_set():
-                break
             
         self.pipeline.stop()
 

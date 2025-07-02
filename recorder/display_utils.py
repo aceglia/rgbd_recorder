@@ -25,36 +25,65 @@ class CurveTab(Tab):
     def __init__(self, name, content):
         super().__init__(name, content)
         self.type = DisplayType.CURVE
-        self.data_queue = None
-        self.nb_channels = 1 if name == 'trigger' else len(self.content["devices"])
-        self.channel_names = ["trigger"] if name == 'trigger' else [device["name"] for device in self.content["devices"]]
+        self.queues = None
+
+        self.name = name
+        if name == 'trigger':
+            self.nb_channels = [1]
+            self.channel_names = ["trigger"]
+        else:
+            self.nb_emg =0
+            self.nb_aux = 0
+            self.emg_names = []
+            self.aux_names = []
+            self.sensor_idxs = []
+            for device in self.content["devices"]:
+                self.sensor_idxs.append(device["sensor_idx"])
+                if device['data_type'] == 'emg':
+                    self.nb_emg += 1
+                    self.emg_names.append(device["name"])
+                elif device['data_type'] == 'gogniometer':
+                    self.nb_emg += 1
+                    self.emg_names.append(device["name"] + '_axis_1')
+                    self.nb_aux += 1
+                    self.aux_names.append(device["name"] + '_axis_2')
+                
+            self.nb_channels = [self.nb_emg, self.nb_aux]
+            self.channel_names = [self.emg_names,  self.aux_names]
         self.initialize_widget()
     
     def initialize_widget(self):
-        self.plot_curve = LivePlot(
-        name=self.name,
-        rate=100,
-        plot_type=PlotType.Curve,
-        nb_subplots=self.nb_channels,
-        channel_names=self.channel_names
-        )
-        self.plot_curve.init(plot_windows=10000, y_labels=["V"] * self.nb_channels, create_app=False)
-
-        self.widget = self.plot_curve.win
+        self.plots = []
         layout = QVBoxLayout()
-        layout.addWidget(self.widget)
+
+        for n_channel, channel_names in zip(self.nb_channels, self.channel_names):
+            plot_curve = LivePlot(
+            name=self.name,
+            rate=100,
+            plot_type=PlotType.Curve,
+            nb_subplots=n_channel,
+            channel_names=channel_names
+            )
+            plot_curve.init(plot_windows=10000, y_labels=["V"] * n_channel, create_app=False)
+            self.plots.append(plot_curve)
+            layout.addWidget(plot_curve.win)
+
         self.setLayout(layout)
     
     def update_plot(self):
-        try:
-            data = self.data_queue.get(timeout=0.1)
-        except:
-            return
-        self.plot_curve.update(data[None, :])
+        for queue, plot in zip(self.queues, self.plots):
+            try:
+                data = queue.get_nowait()
+                plot.update(data)
+            except:
+                continue
+        return
 
-        
     def set_data(self, data):
-        self.data_queue = data
+        if self.name == 'trigger':
+            self.queues = [data]
+        else:
+            self.queues = [data[0], data[1]]
 
 
 class ImageTab(Tab):
@@ -76,7 +105,7 @@ class ImageTab(Tab):
     # def resizeEvent(self, a0):
     #     self.image_widget.update_scaled_image()
     
-    def update_plot(self):
+    def update_plot(self, **kwargs):
         try:
             frame_number, buff_idx = self.frame_queue.get(timeout=0.1)
             color_image = self.shared_color_image[..., buff_idx].copy()
